@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace NetRts.Protocol;
 
 /// <summary>Everything one player is allowed to see this tick (fog of war applied).</summary>
@@ -36,10 +38,32 @@ public sealed record GameStateDto
     /// </summary>
     public IReadOnlyList<RememberedBuildingDto> RememberedBuildings { get; init; } = [];
 
+    /// <summary>Siege shots in flight that you fired, or that will land on a tile you can see.</summary>
+    public IReadOnlyList<ShellDto> Shells { get; init; } = [];
+
     /// <summary>Your recent events (command failures, completions, losses...), newest last.</summary>
     public IReadOnlyList<GameEventDto> Events { get; init; } = [];
 
     public MatchOutcomeDto? Outcome { get; init; }
+}
+
+/// <summary>
+/// A siege shot in flight. It lands on tile (x, y) at the end of <see cref="LandsTick"/> and hits every
+/// enemy of its owner standing there then; anything that has moved off the tile is missed.
+/// </summary>
+public sealed record ShellDto
+{
+    public int Owner { get; init; }
+
+    /// <summary>The unit that fired it (it may have died since).</summary>
+    public int AttackerId { get; init; }
+
+    public int FromX { get; init; }
+    public int FromY { get; init; }
+    public int X { get; init; }
+    public int Y { get; init; }
+    public int FiredTick { get; init; }
+    public int LandsTick { get; init; }
 }
 
 public sealed record SelfDto
@@ -103,6 +127,10 @@ public sealed record UnitDto
 
     /// <summary>Current destination, if any.</summary>
     public PositionDto? Destination { get; init; }
+
+    /// <summary>Temporary effects on this unit; left out when there are none.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Effects { get; init; }
 }
 
 public sealed record BuildingDto
@@ -159,8 +187,8 @@ public sealed record GameEventDto
     public int Tick { get; init; }
 
     /// <summary>
-    /// Machine readable kind, e.g. CommandFailed, UnitProduced, UnitLost, UnitKilled, BuildingCompleted,
-    /// BuildingLost, BuildingDestroyed, ResearchCompleted, DepositDepleted, PlayerEliminated.
+    /// Machine readable kind, e.g. CommandFailed, UnitProduced, UnitLost, UnitKilled, BuildingStarted,
+    /// BuildingCompleted, BuildingLost, BuildingDestroyed, ResearchCompleted, DepositDepleted, PlayerEliminated.
     /// </summary>
     public string Kind { get; init; } = "";
 

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace NetRts.Protocol;
 
 public sealed record MatchSettingsDto
@@ -74,8 +76,29 @@ public sealed record MatchSummaryDto
     /// </summary>
     public IReadOnlyList<HeatDto>? Heats { get; init; }
 
+    /// <summary>A league match the admin has closed: no more rounds or players.</summary>
+    public bool Closed { get; init; }
+
+    /// <summary>A closed league match whose points are on the ladder.</summary>
+    public bool Finalized { get; init; }
+
     /// <summary>For a heat: the league match it belongs to.</summary>
     public Guid? ParentMatchId { get; init; }
+}
+
+/// <summary>One page of finished matches from the archive (GET /api/v1/matches/archive), newest first.</summary>
+public sealed record MatchArchivePageDto
+{
+    /// <summary>How many finished matches pass the filters, across every page.</summary>
+    public int Total { get; init; }
+
+    /// <summary>How many matching matches come before this page.</summary>
+    public int Skip { get; init; }
+
+    /// <summary>The page size asked for (1-100).</summary>
+    public int Limit { get; init; }
+
+    public IReadOnlyList<MatchSummaryDto> Matches { get; init; } = [];
 }
 
 /// <summary>Change a running match's speed. Either field may be left out.</summary>
@@ -137,6 +160,83 @@ public sealed record PlayerResultDto
     public int UnitsKilled { get; init; }
     public int BuildingsLost { get; init; }
     public int BuildingsDestroyed { get; init; }
+
+    /// <summary>How the match went for this player, in more detail. Null for matches recorded before these were kept.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PlayerMatchStatsDto? Stats { get; init; }
+}
+
+/// <summary>A player's match in numbers: what they built and trained, and how they played. Used for achievements and recaps.</summary>
+public sealed record PlayerMatchStatsDto
+{
+    /// <summary>Units trained, by type. The starting workers don't count.</summary>
+    public IReadOnlyDictionary<UnitType, int> UnitsTrained { get; init; } = new Dictionary<UnitType, int>();
+
+    /// <summary>Buildings finished, by type. The starting Command Center doesn't count.</summary>
+    public IReadOnlyDictionary<BuildingType, int> BuildingsCompleted { get; init; } = new Dictionary<BuildingType, int>();
+
+    /// <summary>Research completed.</summary>
+    public IReadOnlyList<UpgradeType> Upgrades { get; init; } = [];
+
+    /// <summary>Tick the first Barracks was finished, if one was.</summary>
+    public int? FirstBarracksTick { get; init; }
+
+    /// <summary>Tick the first Soldier, Archer or Scout was ready, if one was.</summary>
+    public int? FirstCombatUnitTick { get; init; }
+
+    /// <summary>Tick this player first saw an enemy Command Center, if they did.</summary>
+    public int? EnemyCommandCenterSeenTick { get; init; }
+
+    /// <summary>Resource deposits this player's workers mined dry.</summary>
+    public int DepositsExhausted { get; init; }
+
+    /// <summary>Enemy Command Centers destroyed.</summary>
+    public int CommandCentersDestroyed { get; init; }
+
+    /// <summary>Most workers alive at once.</summary>
+    public int PeakWorkers { get; init; }
+
+    /// <summary>Most ore banked at once.</summary>
+    public int PeakResources { get; init; }
+
+    /// <summary>Ore workers brought home that didn't fit in storage.</summary>
+    public int OreWasted { get; init; }
+
+    /// <summary>Enemy units killed by this player's guard towers.</summary>
+    public int TowerKills { get; init; }
+
+    /// <summary>Whether this player took the serum.</summary>
+    public bool SerumTaken { get; init; }
+
+    /// <summary>Enemy units killed by serum-boosted soldiers.</summary>
+    public int SerumKills { get; init; }
+
+    /// <summary>Commands accepted into the queue.</summary>
+    public int CommandsQueued { get; init; }
+
+    /// <summary>Commands rejected when submitted.</summary>
+    public int CommandsRejected { get; init; }
+
+    /// <summary>Commands that failed when they ran (CommandFailed events).</summary>
+    public int CommandsFailed { get; init; }
+
+    /// <summary>Longest stretch, in ticks, any one worker spent idle.</summary>
+    public int LongestWorkerIdleTicks { get; init; }
+
+    /// <summary>Different buildings given a rally point.</summary>
+    public int BuildingsRallied { get; init; }
+
+    /// <summary>Completed guard towers standing when the match ended.</summary>
+    public int GuardTowersStanding { get; init; }
+
+    /// <summary>Health of the player's healthiest Command Center when the match ended, in percent; null if they had none.</summary>
+    public int? CommandCenterHealthPercent { get; init; }
+
+    /// <summary>
+    /// The lowest this player's score fell relative to the leader's, in percent (100 = never behind),
+    /// checked every 10 ticks from tick 100 while they were still in the match.
+    /// </summary>
+    public int LowestScoreSharePercent { get; init; } = 100;
 }
 
 /// <summary>Omniscient view for spectators: every entity, every player's economy.</summary>
@@ -153,6 +253,7 @@ public sealed record SpectatorStateDto
     public IReadOnlyList<UnitDto> Units { get; init; } = [];
     public IReadOnlyList<BuildingDto> Buildings { get; init; } = [];
     public IReadOnlyList<ResourceDepositDto> Resources { get; init; } = [];
+    public IReadOnlyList<ShellDto> Shells { get; init; } = [];
     public IReadOnlyList<GameEventDto> Events { get; init; } = [];
     public MatchOutcomeDto? Outcome { get; init; }
 }
@@ -181,24 +282,39 @@ public sealed record SpectatorPlayerDto
 public sealed record ReplayDto
 {
     public Guid MatchId { get; init; }
+
+    /// <summary>Map size and seed: the map is generated from these, so it isn't stored.</summary>
     public int MapWidth { get; init; }
+
     public int MapHeight { get; init; }
     public int Seed { get; init; }
     public int MaxTicks { get; init; }
+
+    /// <summary>Player ids by slot.</summary>
     public IReadOnlyList<Guid> Players { get; init; } = [];
 
-    /// <summary>Commands in the exact order they were executed.</summary>
+    /// <summary>Commands in the order they were queued, each with the tick it was queued on.</summary>
     public IReadOnlyList<ReplayCommandDto> Commands { get; init; } = [];
 
     /// <summary>Surrenders, by tick.</summary>
     public IReadOnlyList<ReplaySurrenderDto> Surrenders { get; init; } = [];
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ReplayBoostDto>? Boosts { get; init; }
+
+    /// <summary>How the match ended; null while it is still being played.</summary>
     public MatchOutcomeDto? Outcome { get; init; }
 }
 
-public sealed record ReplayCommandDto(int Tick, int Slot, CommandRequest Command);
+public sealed record ReplayCommandDto(
+    int Tick,
+    int Slot,
+    CommandRequest Command,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Boosted = false);
 
 public sealed record ReplaySurrenderDto(int Tick, int Slot);
+
+public sealed record ReplayBoostDto(int Tick, int Slot);
 
 /// <summary>
 /// How to play back a finished match frame by frame: what spectators saw on every tick, in chunks of
